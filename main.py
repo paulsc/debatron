@@ -59,18 +59,18 @@ class Bot:
         ]
 
         gpt_messages = self.make_prompt() + formatted_messages
-        for msg in gpt_messages: print(msg)
+        for msg in gpt_messages: logging.info(msg)
 
         response = await self.gpt.chat.completions.create(
             model="gpt-3.5-turbo", 
             messages=gpt_messages,
             max_tokens=200)
-        #print(f"Model used: {response.model}")
+        #logging.debug(f"Model used: {response.model}")
         answer = response.choices[0].message.content.strip()
         parsed = json.loads(answer)
         self.last_score = parsed
         self.last_score["message_id"] = message.message_id
-        print(answer)
+        logging.info(answer)
         return parsed
 
     async def update_criterias_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,6 +125,14 @@ class Bot:
         self.telegram.run_polling()
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(name)s %(levelname)s %(message)s',
+        handlers=[
+            logging.FileHandler('debatron.log'),
+            logging.StreamHandler()
+        ]
+    )
     coloredlogs.install(
         fmt='%(asctime)s %(name)s %(levelname)s %(message)s',
         level=logging.INFO
