@@ -17,10 +17,11 @@ message is a short (50 words) message justifying the score. Your criterias are:
 
 class Bot:
     def __init__(self):
-        self.MESSAGES = []
-        self.LAST_SCORE = None
+        self.chat_messages = []
+        self.last_score = None
         self.gpt = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-        self.telegram = ApplicationBuilder().token(os.environ.get("TELEGRAM_BOT_TOKEN")).build()
+        TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+        self.telegram = ApplicationBuilder().token(TG_TOKEN).build()
         self.add_chat_handlers()
 
     def make_prompt(self):
@@ -39,11 +40,11 @@ class Bot:
 
     async def aiquery(self, msg):
         formatted = {"role": "user", "content": msg}
-        self.MESSAGES.append(formatted)
-        self.MESSAGES = self.MESSAGES[-10:]
-        current_user = self.MESSAGES[-1]["content"].split(":")[0]
-        for msg in self.MESSAGES: print(msg["content"])
-        gpt_messages = self.make_prompt() + self.MESSAGES
+        self.chat_messages.append(formatted)
+        self.chat_messages = self.chat_messages[-10:]
+        current_user = self.chat_messages[-1]["content"].split(":")[0]
+        for msg in self.chat_messages: print(msg["content"])
+        gpt_messages = self.make_prompt() + self.chat_messages
         print(gpt_messages)
         response = await self.gpt.chat.completions.create(
             model="gpt-3.5-turbo", 
@@ -52,8 +53,8 @@ class Bot:
         #print(f"Model used: {response.model}")
         answer = response.choices[0].message.content.strip()
         parsed = json.loads(answer)
-        self.LAST_SCORE = parsed
-        self.LAST_SCORE["user"] = current_user
+        self.last_score = parsed
+        self.last_score["user"] = current_user
         print(answer)
         return parsed
 
@@ -73,7 +74,7 @@ class Bot:
                                    text="Criterias updated.")
 
     async def last_score_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        msg = "none" if self.LAST_SCORE is None else self.format_score(self.LAST_SCORE)
+        msg = "none" if self.last_score is None else self.format_score(self.last_score)
         await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
 
     async def message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
