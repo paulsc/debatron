@@ -43,7 +43,7 @@ async def aiquery(msg):
     gpt_messages = make_prompt() + MESSAGES
     print(gpt_messages)
     response = await aiclient.chat.completions.create(
-        model="gpt-4", 
+        model="gpt-3.5-turbo", 
         messages=gpt_messages,
         max_tokens=200)
     #print(f"Model used: {response.model}")
@@ -68,7 +68,12 @@ def format_score(response):
     return msg
 
 async def update_criterias_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    newcrits = " ".join(context.args)
+    split = update.message.text.split(None, 1)
+    if len(split) == 1:
+        await context.bot.send_message(chat_id=update.effective_chat.id, 
+                                   text="No new criterias provided.")
+        return
+    newcrits = split[1]
     logging.info(f"Updating criterias: {newcrits}")
     update_criterias(newcrits)
     await context.bot.send_message(chat_id=update.effective_chat.id, 
@@ -86,11 +91,23 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if response["score"] < 5:
         await update.message.reply_text(format_score(response))
 
+async def hello_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    criterias = read_criterias()
+    intro_message = (
+        "Hello! I'm a friendly moderator bot for political discussions. "
+        "I evaluate messages based on the following criteria:\n\n"
+        f"{criterias}\n\n"
+        "I'm here to help maintain a positive and constructive conversation. "
+        "Feel free to chat, and I'll provide feedback when necessary!"
+    )
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=intro_message)
+
 if __name__ == '__main__':
     application = ApplicationBuilder().token(BOTTOKEN).build()
 
     application.add_handler(CommandHandler('last', last_score_handler))
     application.add_handler(CommandHandler('criterias', update_criterias_handler))
+    application.add_handler(CommandHandler('hello', hello_handler))
 
     msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler)
     application.add_handler(msg_handler)
