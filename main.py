@@ -3,10 +3,14 @@ import sys
 import json
 import logging
 import coloredlogs
+
 from telegram import Update
 from telegram.ext import filters, ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler
 
 from openai import AsyncOpenAI
+
+from dotenv import load_dotenv
+load_dotenv()
 
 PROMPT_PREAMBLE = """
 You are a moderator in a group for political discussion, you return a score
