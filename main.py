@@ -24,6 +24,14 @@ class Bot:
         self.telegram = ApplicationBuilder().token(TG_TOKEN).build()
         self.add_chat_handlers()
 
+    @staticmethod
+    def format_message(message):
+        return f"{message.from_user.full_name}: {message.text}"
+
+    @staticmethod
+    def format_score(response):
+        return f"Score: {response['score']}/10. {response['message']}"
+
     def make_prompt(self):
         criterias = None
         criterias = self.read_criterias()
@@ -38,14 +46,17 @@ class Bot:
         with open('criterias.txt', 'w') as file:
             file.write(criterias)
 
-    async def aiquery(self, msg):
-        formatted = {"role": "user", "content": msg}
-        self.chat_messages.append(formatted)
+    async def aiquery(self, message: Update):
+        self.chat_messages.append(message)
         self.chat_messages = self.chat_messages[-10:]
-        current_user = self.chat_messages[-1]["content"].split(":")[0]
-        for msg in self.chat_messages: print(msg["content"])
-        gpt_messages = self.make_prompt() + self.chat_messages
-        print(gpt_messages)
+        formatted_messages = [ 
+            { "role": "user", "content": self.format_message(msg) }
+            for msg in self.chat_messages
+        ]
+
+        gpt_messages = self.make_prompt() + formatted_messages
+        for msg in gpt_messages: print(msg)
+
         response = await self.gpt.chat.completions.create(
             model="gpt-3.5-turbo", 
             messages=gpt_messages,
@@ -54,12 +65,9 @@ class Bot:
         answer = response.choices[0].message.content.strip()
         parsed = json.loads(answer)
         self.last_score = parsed
-        self.last_score["user"] = current_user
+        self.last_score["message_id"] = message.message_id
         print(answer)
         return parsed
-
-    def format_score(self, response):
-        return f"Score: {response['score']}/10. {response['message']}"
 
     async def update_criterias_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         split = update.message.text.split(None, 1)
@@ -74,14 +82,19 @@ class Bot:
                                    text="Criterias updated.")
 
     async def last_score_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        msg = "none" if self.last_score is None else self.format_score(self.last_score)
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
+        if self.last_score is None:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="No score available yet.")
+            return
+        msg = self.format_score(self.last_score)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=msg,
+            reply_to_message_id=self.last_score["message_id"]
+        )
 
     async def message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        src = update.message.from_user.full_name
-        msg = src + ":" + update.message.text
-        logging.info("Got MSG> " + msg)
-        response = await self.aiquery(msg)
+        logging.info(f"Got MSG> {update.message.from_user.full_name}: {update.message.text}")
+        response = await self.aiquery(update.message)
         if response["score"] < 5:
             await update.message.reply_text(self.format_score(response))
 
