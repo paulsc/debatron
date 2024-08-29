@@ -62,7 +62,7 @@ class Bot:
         for msg in gpt_messages: logging.info(msg)
 
         response = await self.gpt.chat.completions.create(
-            model="gpt-3.5-turbo", 
+            model="gpt-4", 
             messages=gpt_messages,
             max_tokens=200)
         #logging.debug(f"Model used: {response.model}")
