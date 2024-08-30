@@ -27,10 +27,15 @@ class Bot:
         TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
         self.telegram = ApplicationBuilder().token(TG_TOKEN).build()
         self.add_chat_handlers()
+        self.setup_loggers()
 
     @staticmethod
     def format_message(message):
         return f"{message.from_user.full_name}: {message.text}"
+
+    @staticmethod
+    def format_message_gpt(message):
+        return { "role": "user", "content": Bot.format_message(message) }
 
     @staticmethod
     def format_score(response):
@@ -53,16 +58,18 @@ class Bot:
     async def aiquery(self, message: Update):
         self.chat_messages.append(message)
         self.chat_messages = self.chat_messages[-10:]
-        formatted_messages = [ 
-            { "role": "user", "content": self.format_message(msg) }
-            for msg in self.chat_messages
-        ]
 
-        gpt_messages = self.make_prompt() + formatted_messages
-        for msg in gpt_messages: logging.info(msg)
+        #formatted_messages = [ 
+        #    { "role": "user", "content": Bot.format_message(msg) }
+        #    for msg in self.chat_messages
+        #]
+        #gpt_messages = self.make_prompt() + formatted_messages
+
+        gpt_messages = self.make_prompt() + [ Bot.format_message_gpt(message) ] 
+        #for msg in gpt_messages: logging.info(msg)
 
         response = await self.gpt.chat.completions.create(
-            model="gpt-4", 
+            model="gpt-3.5-turbo", 
             messages=gpt_messages,
             max_tokens=200)
         #logging.debug(f"Model used: {response.model}")
@@ -89,7 +96,7 @@ class Bot:
         if self.last_score is None:
             await context.bot.send_message(chat_id=update.effective_chat.id, text="No score available yet.")
             return
-        msg = self.format_score(self.last_score)
+        msg = Bot.format_score(self.last_score)
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=msg,
@@ -97,10 +104,11 @@ class Bot:
         )
 
     async def message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logging.info(f"Got MSG> {update.message.from_user.full_name}: {update.message.text}")
-        response = await self.aiquery(update.message)
-        if response["score"] < 5:
-            await update.message.reply_text(self.format_score(response))
+        message = f"{update.message.from_user.full_name}: {update.message.text}"
+        self.chat_logger.info(message)
+        #response = await self.aiquery(update.message)
+        #if response["score"] < 5:
+        #    await update.message.reply_text(Bot.format_score(response))
 
     async def hello_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         criterias = self.read_criterias()
@@ -121,22 +129,35 @@ class Bot:
         msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), self.message_handler)
         self.telegram.add_handler(msg_handler)
 
+    def setup_loggers(self):
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s %(name)s %(levelname)s %(message)s',
+            handlers=[
+                logging.FileHandler('debatron.log'),
+                logging.StreamHandler()
+            ]
+        )
+
+        coloredlogs.install(
+            fmt='%(asctime)s %(name)s %(levelname)s %(message)s',
+            level=logging.INFO
+        )
+
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+
+        self.chat_logger = logging.getLogger('chat')
+        self.chat_logger.setLevel(logging.INFO)
+        chat_handler = logging.FileHandler('chat.log')
+        chat_formatter = logging.Formatter('%(asctime)s - %(message)s')
+        chat_handler.setFormatter(chat_formatter)
+        self.chat_logger.addHandler(chat_handler)
+
     def run(self):
+        logging.info("Bot started")
         self.telegram.run_polling()
 
 if __name__ == '__main__':
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s %(name)s %(levelname)s %(message)s',
-        handlers=[
-            logging.FileHandler('debatron.log'),
-            logging.StreamHandler()
-        ]
-    )
-    coloredlogs.install(
-        fmt='%(asctime)s %(name)s %(levelname)s %(message)s',
-        level=logging.INFO
-    )
     bot = Bot()
     bot.run()
 
