@@ -104,7 +104,8 @@ class Bot:
         )
 
     async def message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        message = f"{update.message.from_user.full_name}: {update.message.text}"
+        chat_title = update.effective_chat.title or "Private Chat"
+        message = f"[{chat_title}] {update.message.from_user.full_name}: {update.message.text}"
         self.chat_logger.info(message)
         #response = await self.aiquery(update.message)
         #if response["score"] < 5:
