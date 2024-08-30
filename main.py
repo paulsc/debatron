@@ -105,6 +105,9 @@ class Bot:
         )
 
     async def message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.edited_message:
+            logging.info(f"Skipping message edit by {update.edited_message.from_user.full_name}")
+            return
         chat_title = update.effective_chat.title or "Private Chat"
         message = f"[{chat_title}] {update.message.from_user.full_name}: {update.message.text}"
         self.chat_logger.info(message)
