@@ -10,7 +10,7 @@ from telegram.ext import filters, ApplicationBuilder, ContextTypes, CommandHandl
 from openai import AsyncOpenAI
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 PROMPT_PREAMBLE = """
 You are a moderator in a group for political discussion, you return a score
@@ -23,11 +23,12 @@ class Bot:
     def __init__(self):
         self.chat_messages = []
         self.last_score = None
+
+        self.setup_loggers()
         self.gpt = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
         self.telegram = ApplicationBuilder().token(TG_TOKEN).build()
         self.add_chat_handlers()
-        self.setup_loggers()
 
     @staticmethod
     def format_message(message):
@@ -107,7 +108,7 @@ class Bot:
         chat_title = update.effective_chat.title or "Private Chat"
         message = f"[{chat_title}] {update.message.from_user.full_name}: {update.message.text}"
         self.chat_logger.info(message)
-        #response = await self.aiquery(update.message)
+        response = await self.aiquery(update.message)
         #if response["score"] < 5:
         #    await update.message.reply_text(Bot.format_score(response))
 
