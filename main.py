@@ -6,12 +6,15 @@ import coloredlogs
 
 from telegram import Update
 from telegram.ext import filters, ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler
-
 from openai import AsyncOpenAI
-
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
+from cache import Cache
+
+GPT_MODEL = "gpt-4"
+#GPT_MODEL = "gpt-3.5-turbo"
+CACHE_SIZE = 1000
 PROMPT_PREAMBLE = """
 You are a moderator in a group for political discussion, you return a score
 for the last message sent in the group chat was. 0 is a bad message, 10 is a
@@ -22,7 +25,7 @@ message is a short (50 words) message justifying the score. Your criterias are:
 class Bot:
     def __init__(self):
         self.chat_messages = []
-        self.last_score = None
+        self.score_cache = Cache(CACHE_SIZE)
 
         self.setup_loggers()
         self.gpt = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -57,31 +60,27 @@ class Bot:
             file.write(criterias)
 
     async def aiquery(self, message: Update):
+        if message in self.score_cache:
+            return self.score_cache[message]
+
         self.chat_messages.append(message)
         self.chat_messages = self.chat_messages[-10:]
 
-        #formatted_messages = [ 
-        #    { "role": "user", "content": Bot.format_message(msg) }
-        #    for msg in self.chat_messages
-        #]
-        #gpt_messages = self.make_prompt() + formatted_messages
-
-        gpt_messages = self.make_prompt() + [ Bot.format_message_gpt(message) ] 
-        #for msg in gpt_messages: logging.info(msg)
+        gpt_messages = self.make_prompt() + [Bot.format_message_gpt(message)]
 
         response = await self.gpt.chat.completions.create(
-            model="gpt-3.5-turbo", 
+            model=GPT_MODEL, 
             messages=gpt_messages,
             max_tokens=200)
-        #logging.debug(f"Model used: {response.model}")
         answer = response.choices[0].message.content.strip()
         parsed = json.loads(answer)
-        self.last_score = parsed
-        self.last_score["message_id"] = message.message_id
         logging.info(answer)
+
+        self.score_cache[message] = parsed
         return parsed
 
     async def update_criterias_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logging.info(f"/criterias handler called")
         split = update.message.text.split(None, 1)
         if len(split) == 1:
             await context.bot.send_message(chat_id=update.effective_chat.id, 
@@ -92,17 +91,6 @@ class Bot:
         self.update_criterias(newcrits)
         await context.bot.send_message(chat_id=update.effective_chat.id, 
                                    text="Criterias updated.")
-
-    async def last_score_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if self.last_score is None:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text="No score available yet.")
-            return
-        msg = Bot.format_score(self.last_score)
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=msg,
-            reply_to_message_id=self.last_score["message_id"]
-        )
 
     async def message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.edited_message:
@@ -116,6 +104,7 @@ class Bot:
         #    await update.message.reply_text(Bot.format_score(response))
 
     async def hello_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logging.info(f"/hello handler called")
         criterias = self.read_criterias()
         intro_message = (
             "Hello! I'm a friendly moderator bot for political discussions. "
@@ -126,10 +115,26 @@ class Bot:
         )
         await context.bot.send_message(chat_id=update.effective_chat.id, text=intro_message)
 
+    async def review_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logging.info(f"/review handler called")
+        if not update.message.reply_to_message:
+            await context.bot.send_message(chat_id=update.effective_chat.id, 
+                text="Please reply to the message you want to review with /review.")
+            return
+        message = update.message.reply_to_message
+        response = await self.aiquery(message)
+        msg = Bot.format_score(response)
+
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=msg,
+            reply_to_message_id=message.message_id
+        )
+
     def add_chat_handlers(self):
-        self.telegram.add_handler(CommandHandler('last', self.last_score_handler))
-        self.telegram.add_handler(CommandHandler('criterias', self.update_criterias_handler))
         self.telegram.add_handler(CommandHandler('hello', self.hello_handler))
+        self.telegram.add_handler(CommandHandler('criterias', self.update_criterias_handler))
+        self.telegram.add_handler(CommandHandler('review', self.review_handler))
 
         msg_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), self.message_handler)
         self.telegram.add_handler(msg_handler)
