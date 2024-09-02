@@ -4,7 +4,7 @@ import json
 import logging
 import coloredlogs
 
-from telegram import Update
+from telegram import Update, Message
 from telegram.ext import filters, ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
@@ -38,10 +38,6 @@ class Bot:
         return f"{message.from_user.full_name}: {message.text}"
 
     @staticmethod
-    def format_message_gpt(message):
-        return { "role": "user", "content": Bot.format_message(message) }
-
-    @staticmethod
     def format_score(response):
         return f"Score: {response['score']}/10. {response['message']}"
 
@@ -59,14 +55,22 @@ class Bot:
         with open('criterias.txt', 'w') as file:
             file.write(criterias)
 
-    async def aiquery(self, message: Update):
+    async def analyze(self, message: Update):
         if message in self.score_cache:
             return self.score_cache[message]
 
         self.chat_messages.append(message)
         self.chat_messages = self.chat_messages[-10:]
 
-        gpt_messages = self.make_prompt() + [Bot.format_message_gpt(message)]
+        text = Bot.format_message(message)
+        parsed = await self.chatgpt_query(text)
+
+        self.score_cache[message] = parsed
+        return parsed
+
+    async def chatgpt_query(self, text: str):
+        gpt_message = { "role": "user", "content": text }
+        gpt_messages = self.make_prompt() + [gpt_message]
 
         response = await self.gpt.chat.completions.create(
             model=GPT_MODEL, 
@@ -75,8 +79,6 @@ class Bot:
         answer = response.choices[0].message.content.strip()
         parsed = json.loads(answer)
         logging.info(answer)
-
-        self.score_cache[message] = parsed
         return parsed
 
     async def update_criterias_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -99,7 +101,7 @@ class Bot:
         chat_title = update.effective_chat.title or "Private Chat"
         message = f"[{chat_title}] {update.message.from_user.full_name}: {update.message.text}"
         self.chat_logger.info(message)
-        response = await self.aiquery(update.message)
+        response = await self.analyze(update.message)
         #if response["score"] < 5:
         #    await update.message.reply_text(Bot.format_score(response))
 
@@ -122,7 +124,7 @@ class Bot:
                 text="Please reply to the message you want to review with /review.")
             return
         message = update.message.reply_to_message
-        response = await self.aiquery(message)
+        response = await self.analyze(message)
         msg = Bot.format_score(response)
 
         await context.bot.send_message(

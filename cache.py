@@ -47,13 +47,13 @@ class Cache:
         return "CACHE " + "-"*24 + "\n" + "\n".join(
             f"{key}: {value}" for key, value in self.cache.items()) + "\n" + "-"*30
 
-if __name__ == "__main__":
-    def create_mock_message(chat_id, message_id, user_id, text):
-        user = User(id=user_id, first_name="Test", is_bot=False)
-        chat = Chat(id=chat_id, type="private")
-        return Message(message_id=message_id, from_user=user, chat=chat, 
-                          date=None, text=text)
+def create_mock_message(chat_id, message_id, user_id, text):
+    user = User(id=user_id, first_name="Test", is_bot=False)
+    chat = Chat(id=chat_id, type="private")
+    return Message(message_id=message_id, from_user=user, chat=chat, 
+                      date=None, text=text)
 
+if __name__ == "__main__":
     cache = Cache(max_size=3)
 
     update1 = create_mock_message(chat_id=1, message_id=1, user_id=1, text="msg1")
