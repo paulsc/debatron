@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import logging
+from typing import List
 import coloredlogs
 
 from telegram import Update, Message
@@ -15,12 +16,17 @@ from cache import Cache
 GPT_MODEL = "gpt-4"
 #GPT_MODEL = "gpt-3.5-turbo"
 CACHE_SIZE = 1000
-PROMPT_PREAMBLE = """
-You are a moderator in a group for political discussion, you return a score
-for the last message sent in the group chat was. 0 is a bad message, 10 is a
-good one. You return JSON, one score attribute and one message attribute, the
-message is a short (50 words) message justifying the score. Your criterias are:
+HISTORY_LENGTH = 20
+
+SYSTEM_PROMPT_PREAMBLE = """
+You are a helpful assistant that scores chat messages. 0 is a bad message, 10 is
+a good one. You return JSON, one score attribute and one message attribute, the
+message is a short (20 words) message justifying the score. 
+Your criterias for scoring are:
 """
+USER_PROMPT_HISTORY = "Here is the partial history of the conversation for context:"
+USER_PROMPT_LAST_MESSAGE = "Please provide a score for the last message, which is:"
+
 
 class Bot:
     def __init__(self):
@@ -41,11 +47,14 @@ class Bot:
     def format_score(response):
         return f"Score: {response['score']}/10. {response['message']}"
 
-    def make_prompt(self):
-        criterias = None
+    @staticmethod
+    def gpt_message(role, content):
+        return { "role": role, "content": content }
+
+    def make_system_prompt(self):
         criterias = self.read_criterias()
-        prompt = PROMPT_PREAMBLE + "\n" + criterias.replace('\n', '')
-        return [{"role": "system", "content": prompt}]
+        prompt = SYSTEM_PROMPT_PREAMBLE + "\n" + criterias.replace('\n', '')
+        return {"role": "system", "content": prompt}
 
     def read_criterias(self):
         with open('criterias.txt') as file:
@@ -55,31 +64,55 @@ class Bot:
         with open('criterias.txt', 'w') as file:
             file.write(criterias)
 
-    async def analyze(self, message: Update):
-        if message in self.score_cache:
-            return self.score_cache[message]
-
+    async def ingest(self, message: Update):
         self.chat_messages.append(message)
-        self.chat_messages = self.chat_messages[-10:]
+        self.chat_messages = self.chat_messages[-HISTORY_LENGTH:]
 
-        text = Bot.format_message(message)
-        parsed = await self.chatgpt_query(text)
+        texts = [ Bot.format_message(msg) for msg in self.chat_messages ]
+        parsed = await self.chatgpt_query(texts)
 
         self.score_cache[message] = parsed
         return parsed
 
-    async def chatgpt_query(self, text: str):
-        gpt_message = { "role": "user", "content": text }
-        gpt_messages = self.make_prompt() + [gpt_message]
+    async def chatgpt_query(self, texts: List[str]):
+        user_messages = []
+
+        if len(texts) == 0:
+            raise ValueError("No texts provided for chatgpt_query")
+        if len(texts) == 1:
+            user_messages.append(USER_PROMPT_LAST_MESSAGE)
+            user_messages.append(texts[0])
+        else:
+            user_messages.append(USER_PROMPT_HISTORY)
+            for text in texts[:-1]:
+                user_messages.append(text)
+            user_messages.append(USER_PROMPT_LAST_MESSAGE)
+            user_messages.append(texts[-1])
+
+        sys_prompt = self.make_system_prompt()
+        gpt_messages = [ sys_prompt ] + [ Bot.gpt_message("user", text) for text in user_messages ]
+        #for message in gpt_messages: print(message)
 
         response = await self.gpt.chat.completions.create(
             model=GPT_MODEL, 
             messages=gpt_messages,
-            max_tokens=200)
+            max_tokens=100)
         answer = response.choices[0].message.content.strip()
         parsed = json.loads(answer)
         logging.info(answer)
         return parsed
+
+    async def hello_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logging.info(f"/hello handler called")
+        criterias = self.read_criterias()
+        intro_message = (
+            "Hello! I'm a friendly moderator bot for political discussions. "
+            "I evaluate messages based on the following criteria:\n\n"
+            f"{criterias}\n\n"
+            "I'm here to help maintain a positive and constructive conversation. "
+            "Feel free to chat, and I'll provide feedback when necessary!"
+        )
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=intro_message)
 
     async def update_criterias_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.info(f"/criterias handler called")
@@ -101,21 +134,9 @@ class Bot:
         chat_title = update.effective_chat.title or "Private Chat"
         message = f"[{chat_title}] {update.message.from_user.full_name}: {update.message.text}"
         self.chat_logger.info(message)
-        response = await self.analyze(update.message)
+        response = await self.ingest(update.message)
         #if response["score"] < 5:
         #    await update.message.reply_text(Bot.format_score(response))
-
-    async def hello_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logging.info(f"/hello handler called")
-        criterias = self.read_criterias()
-        intro_message = (
-            "Hello! I'm a friendly moderator bot for political discussions. "
-            "I evaluate messages based on the following criteria:\n\n"
-            f"{criterias}\n\n"
-            "I'm here to help maintain a positive and constructive conversation. "
-            "Feel free to chat, and I'll provide feedback when necessary!"
-        )
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=intro_message)
 
     async def review_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.info(f"/review handler called")
@@ -124,7 +145,13 @@ class Bot:
                 text="Please reply to the message you want to review with /review.")
             return
         message = update.message.reply_to_message
-        response = await self.analyze(message)
+
+        if message not in self.score_cache: 
+            await context.bot.send_message(chat_id=update.effective_chat.id, 
+                text="Message is too old, please try a more recent message.")
+            return
+
+        response = self.score_cache[message]
         msg = Bot.format_score(response)
 
         await context.bot.send_message(

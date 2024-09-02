@@ -2,4 +2,5 @@
 *.log
 *.pyc
 *.bak
+criterias.txt
 testruns/*
