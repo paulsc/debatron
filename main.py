@@ -13,7 +13,8 @@ load_dotenv(override=True)
 
 from cache import Cache
 
-GPT_MODEL = "gpt-4"
+GPT_MODEL = "gpt-4o"
+#GPT_MODEL = "gpt-4"
 #GPT_MODEL = "gpt-3.5-turbo"
 CACHE_SIZE = 1000
 HISTORY_LENGTH = 20
